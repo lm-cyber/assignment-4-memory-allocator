@@ -9,8 +9,6 @@
 #include "mem.h"
 #include "util.h"
 
-#include <stdio.h>
-
 void debug_block(struct block_header* b, const char* fmt, ... );
 void debug(const char* fmt, ... );
 
