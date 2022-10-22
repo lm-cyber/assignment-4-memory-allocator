@@ -9,6 +9,8 @@
 #include "mem.h"
 #include "util.h"
 
+#include <stdio.h>
+
 void debug_block(struct block_header* b, const char* fmt, ... );
 void debug(const char* fmt, ... );
 
@@ -39,7 +41,25 @@ static void* map_pages(void const* addr, size_t length, int additional_flags) {
 
 /*  аллоцировать регион памяти и инициализировать его блоком */
 static struct region alloc_region  ( void const * addr, size_t query ) {
-  /*  ??? */
+    size_t length = region_actual_size(size_from_capacity((block_capacity) {query}).bytes);
+
+    void* ptr = map_pages(addr, length, MAP_FIXED);
+
+    if (ptr == MAP_FAILED) {
+      ptr = map_pages(addr, length, 0);
+    }
+
+    struct region r = (struct region) {
+        .addr = (ptr == MAP_FAILED ? NULL : ptr),
+        .extends = ptr == addr,
+        .size = length
+    };
+
+    if (ptr != MAP_FAILED) {
+        block_init(r.addr, (block_size) {r.size}, NULL);
+    }
+
+    return r;
 }
 
 static void* block_after( struct block_header const* block )         ;
@@ -60,7 +80,14 @@ static bool block_splittable( struct block_header* restrict block, size_t query)
 }
 
 static bool split_if_too_big( struct block_header* block, size_t query ) {
-  /*  ??? */
+    if (block_splittable(block, query)) {
+        block_init(block->contents + query, (block_size) {block->capacity.bytes - query}, block->next);
+        block->capacity.bytes = query;
+        block->next = (struct block_header*) (block->contents + query);
+        return true;
+    }
+
+    return false;
 }
 
 
@@ -80,7 +107,13 @@ static bool mergeable(struct block_header const* restrict fst, struct block_head
 }
 
 static bool try_merge_with_next( struct block_header* block ) {
-  /*  ??? */
+  if (block->next != NULL && mergeable(block, block->next)) {
+    block->capacity.bytes += size_from_capacity(block->next->capacity).bytes;
+    block->next = block->next->next;
+    return true;
+  }
+
+  return false;
 }
 
 
@@ -92,27 +125,73 @@ struct block_search_result {
 };
 
 
-static struct block_search_result find_good_or_last  ( struct block_header* restrict block, size_t sz )    {
-  /*??? */
+static struct block_search_result find_good_or_last( struct block_header* restrict block, size_t sz )    {
+  while (true) {
+    if (block->is_free) {
+      // Merge until we can't merge anymore
+      while (try_merge_with_next(block)) {};
+      if (block_is_big_enough(sz, block)) {
+        return (struct block_search_result) {
+          .type=BSR_FOUND_GOOD_BLOCK,
+          .block=block
+        };
+      }
+    }
+    
+    if (block->next != NULL) {
+      block = block->next;
+    }
+    else {
+      return (struct block_search_result) {
+        .type=BSR_REACHED_END_NOT_FOUND,
+        .block=block
+      };
+    }
+  }
 }
 
 /*  Попробовать выделить память в куче начиная с блока `block` не пытаясь расширить кучу
  Можно переиспользовать как только кучу расширили. */
 static struct block_search_result try_memalloc_existing ( size_t query, struct block_header* block ) {
-  
+  struct block_search_result bsr = find_good_or_last(block, query);
+  if (bsr.type == BSR_FOUND_GOOD_BLOCK) {
+    split_if_too_big(bsr.block, query);
+    bsr.block->is_free = false;
+  }
+
+  return bsr;
 }
 
 
 
 static struct block_header* grow_heap( struct block_header* restrict last, size_t query ) {
-  /*  ??? */
+  struct region r = alloc_region(last->contents + last->capacity.bytes, query);
+
+  if (!region_is_invalid(&r) && r.extends && last->is_free) {
+    last->capacity.bytes += r.size;
+    return last;
+  }
+
+  last->next = r.addr;
+  return r.addr;
 }
 
 /*  Реализует основную логику malloc и возвращает заголовок выделенного блока */
 static struct block_header* memalloc( size_t query, struct block_header* heap_start) {
+  // No point allocating anything smaller than min capacity
+  query = size_max(query, BLOCK_MIN_CAPACITY);
+  struct block_search_result bsr = try_memalloc_existing(query, heap_start);
 
-  /*  ??? */
+  while (bsr.type != BSR_FOUND_GOOD_BLOCK) {
+    fprintf(stderr, "Did not find good block\n");
+    if (grow_heap(bsr.block, query) == NULL) {
+      fprintf(stderr, "Couldn't allocate more heap space");
+      return NULL;
+    }
+    bsr = try_memalloc_existing(query, heap_start);
+  }
 
+  return bsr.block;
 }
 
 void* _malloc( size_t query ) {
@@ -129,5 +208,5 @@ void _free( void* mem ) {
   if (!mem) return ;
   struct block_header* header = block_get_header( mem );
   header->is_free = true;
-  /*  ??? */
+  while (try_merge_with_next(header)) {}
 }
