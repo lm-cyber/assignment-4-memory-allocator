@@ -41,7 +41,7 @@ static void* map_pages(void const* addr, size_t length, int additional_flags) {
 static struct region alloc_region  ( void const * addr, size_t query ) {
     size_t length = region_actual_size(size_from_capacity((block_capacity) {query}).bytes);
 
-    void* ptr = map_pages(addr, length, MAP_FIXED);
+    void* ptr = map_pages(addr, length, MAP_FIXED_NOREPLACE);
 
     if (ptr == MAP_FAILED) {
       ptr = map_pages(addr, length, 0);
@@ -181,9 +181,7 @@ static struct block_header* memalloc( size_t query, struct block_header* heap_st
   struct block_search_result bsr = try_memalloc_existing(query, heap_start);
 
   while (bsr.type != BSR_FOUND_GOOD_BLOCK) {
-    fprintf(stderr, "Did not find good block\n");
     if (grow_heap(bsr.block, query) == NULL) {
-      fprintf(stderr, "Couldn't allocate more heap space");
       return NULL;
     }
     bsr = try_memalloc_existing(query, heap_start);
