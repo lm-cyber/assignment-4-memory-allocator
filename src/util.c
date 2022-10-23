@@ -5,6 +5,7 @@
 #include "util.h"
 
 _Noreturn void err( const char* msg, ... ) {
+  (void) msg;
   //va_list args;
   //va_start (args, msg);
   //vfprintf(stderr, msg, args);
