@@ -164,7 +164,7 @@ int test5() {
 
     // Free allocated space
     _free(block1);
-    munmap(p, h1->contents + h1->capacity.bytes);
+    munmap(p, REGION_MIN_SIZE);
     _free(block2);
 
     return 1;
