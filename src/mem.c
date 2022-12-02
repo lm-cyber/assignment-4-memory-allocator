@@ -43,19 +43,21 @@ static struct region alloc_region  ( void const * addr, size_t query ) {
 
     void* ptr = map_pages(addr, length, MAP_FIXED_NOREPLACE);
 
+    // First pass map continuously
     if (ptr == MAP_FAILED) {
       ptr = map_pages(addr, length, 0);
+      // Second pass map anywhere
+      if (ptr == MAP_FAILED) {
+        return REGION_INVALID;
+      }
     }
 
     struct region r = (struct region) {
-        .addr = (ptr == MAP_FAILED ? NULL : ptr),
-        .extends = ptr == addr,
-        .size = length
+      .addr = ptr,
+      .extends = ptr == addr,
+      .size = length
     };
-
-    if (ptr != MAP_FAILED) {
-        block_init(r.addr, (block_size) {r.size}, NULL);
-    }
+    block_init(r.addr, (block_size) {r.size}, NULL);
 
     return r;
 }
@@ -124,28 +126,33 @@ struct block_search_result {
 
 
 static struct block_search_result find_good_or_last( struct block_header* restrict block, size_t sz )    {
-  while (true) {
-    if (block->is_free) {
-      // Merge until we can't merge anymore
-      while (try_merge_with_next(block)) {};
-      if (block_is_big_enough(sz, block)) {
-        return (struct block_search_result) {
-          .type=BSR_FOUND_GOOD_BLOCK,
-          .block=block
-        };
-      }
-    }
-    
-    if (block->next != NULL) {
-      block = block->next;
-    }
-    else {
+  struct block_header *prev_block = NULL;
+
+  while (block != NULL) {
+    // Merge until we can't merge anymore
+    while (try_merge_with_next(block)) {};
+    if (block->is_free && block_is_big_enough(sz, block)) {
       return (struct block_search_result) {
-        .type=BSR_REACHED_END_NOT_FOUND,
+        .type=BSR_FOUND_GOOD_BLOCK,
         .block=block
       };
     }
+    
+    if (block->next == block) {
+      return (struct block_search_result) {
+        .type=BSR_CORRUPTED,
+        .block=block
+      };
+    }
+
+    prev_block = block;
+    block = block->next;
   }
+
+  return (struct block_search_result) {
+    .type=BSR_REACHED_END_NOT_FOUND,
+    .block=prev_block
+  };
 }
 
 /*  Попробовать выделить память в куче начиная с блока `block` не пытаясь расширить кучу
@@ -180,14 +187,14 @@ static struct block_header* memalloc( size_t query, struct block_header* heap_st
   query = size_max(query, BLOCK_MIN_CAPACITY);
   struct block_search_result bsr = try_memalloc_existing(query, heap_start);
 
-  while (bsr.type != BSR_FOUND_GOOD_BLOCK) {
+  while (bsr.type == BSR_REACHED_END_NOT_FOUND) {
     if (grow_heap(bsr.block, query) == NULL) {
       return NULL;
     }
     bsr = try_memalloc_existing(query, heap_start);
   }
 
-  return bsr.block;
+  return (bsr.type == BSR_FOUND_GOOD_BLOCK ? bsr.block : NULL);
 }
 
 void* _malloc( size_t query ) {

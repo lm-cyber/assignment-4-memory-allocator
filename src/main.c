@@ -4,14 +4,14 @@
 #include "mem.h"
 
 
-typedef bool (*tester)();
+typedef int (*tester)();
 
 static inline struct block_header* get_header_from_contents(void* contents) {
     return (struct block_header*) ((uint8_t*) contents - offsetof(struct block_header, contents));
 }
 
 // Обычное успешное выделение памяти.
-bool test1() {
+int test1() {
     void* heap = heap_init(1000);
     void* block = _malloc(512);
 
@@ -27,7 +27,7 @@ bool test1() {
 }
 
 //Освобождение одного блока из нескольких выделенных.
-bool test2() {
+int test2() {
     printf("Init heap\n");
     void* heap = heap_init(1000);
     printf("Done\n");
@@ -63,7 +63,7 @@ bool test2() {
 }
 
 // Освобождение двух блоков из нескольких выделенных.
-bool test3() {
+int test3() {
     void* heap = heap_init(1000);
     void* block1 = _malloc(100);
     struct block_header* h1 = get_header_from_contents(block1);
@@ -98,7 +98,7 @@ bool test3() {
 }
 
 // Память закончилась, новый регион памяти расширяет старый.
-bool test4() {
+int test4() {
     size_t full_size = capacity_from_size((block_size) {REGION_MIN_SIZE}).bytes;
 
     void* heap = heap_init(full_size);
@@ -130,7 +130,7 @@ bool test4() {
 
 // Память закончилась, старый регион памяти не расширить из-за другого выделенного 
 // диапазона адресов, новый регион выделяется в другом месте
-bool test5() {
+int test5() {
     size_t full_size = capacity_from_size((block_size) {REGION_MIN_SIZE}).bytes;
 
     void* heap = heap_init(full_size);
@@ -161,6 +161,11 @@ bool test5() {
     if (h2 == (void*)(h1->contents + h1->capacity.bytes)) {
         return 0;
     }
+
+    // Free allocated space
+    _free(block1);
+    munmap(p, h1->contents + h1->capacity.bytes);
+    _free(block2);
 
     return 1;
 }
